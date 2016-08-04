@@ -2624,7 +2624,7 @@ def test_object_raw_get_object_gone():
     eq(res.status, 404)
     eq(res.reason, 'Not Found')
 
-def _head_bucket(bucket, authenticated=True):
+def _head_bucket(bucket, authenticated=False):
     res = _make_bucket_request('HEAD', bucket, authenticated=authenticated)
     eq(res.status, 200)
     eq(res.reason, 'OK')
