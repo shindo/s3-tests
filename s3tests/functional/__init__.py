@@ -254,7 +254,7 @@ _multiprocess_can_split_ = True
 
 def setup():
 
-    cfg = ConfigParser.RawConfigParser()
+    cfg = ConfigParser.RawConfigParser(allow_no_value=True)
     try:
         path = os.environ['S3TEST_CONF']
     except KeyError:
