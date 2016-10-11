@@ -2,6 +2,7 @@ from cStringIO import StringIO
 import boto.exception
 import boto.s3.connection
 import boto.s3.acl
+import boto.s3.lifecycle
 import bunch
 import datetime
 import time
@@ -3185,6 +3186,20 @@ def test_bucket_create_exists():
         eq(e.reason, 'Conflict')
         eq(e.error_code, 'BucketAlreadyOwnedByYou')
 
+@attr(resource='bucket')
+@attr(method='put')
+@attr(operation='recreate')
+def test_bucket_configure_recreate():
+    # aws-s3 default region allows recreation of buckets
+    # but all other regions fail with BucketAlreadyOwnedByYou.
+    bucket = get_new_bucket(targets.main.default)
+    try:
+        get_new_bucket(targets.main.default, bucket.name)
+    except boto.exception.S3CreateError, e:
+        eq(e.status, 409)
+        eq(e.reason, 'Conflict')
+        eq(e.error_code, 'BucketAlreadyOwnedByYou')
+
 
 @attr(resource='bucket')
 @attr(method='get')
@@ -4707,6 +4722,12 @@ def test_bucket_create_special_key_names():
     names = [e.name for e in list(li)]
     eq(names, key_names)
 
+    for name in key_names:
+        key = bucket.get_key(name)
+        eq(key.name, name)
+        content = key.get_contents_as_string()
+        eq(content, name)
+
 @attr(resource='bucket')
 @attr(method='get')
 @attr(operation='create and list objects with underscore as prefix, list using prefix')
@@ -4911,6 +4932,118 @@ def test_object_copy_key_not_found():
     eq(e.status, 404)
     eq(e.reason, 'Not Found')
     eq(e.error_code, 'NoSuchKey')
+
+@attr(resource='object')
+@attr(method='put')
+@attr(operation='copy object to/from versioned bucket')
+@attr(assertion='works')
+def test_object_copy_versioned_bucket():
+    bucket = get_new_bucket()
+    check_configure_versioning_retry(bucket, True, "Enabled")
+    key = bucket.new_key('foo123bar')
+    size = 1*1024*1024
+    data = str(bytearray(size))
+    key.set_contents_from_string(data)
+
+    # copy object in the same bucket
+    key2 = bucket.copy_key('bar321foo', bucket.name, key.name, src_version_id = key.version_id)
+    key2 = bucket.get_key(key2.name)
+    eq(key2.size, size)
+    got = key2.get_contents_as_string()
+    eq(got, data)
+
+    # second copy
+    key3 = bucket.copy_key('bar321foo2', bucket.name, key2.name, src_version_id = key2.version_id)
+    key3 = bucket.get_key(key3.name)
+    eq(key3.size, size)
+    got = key3.get_contents_as_string()
+    eq(got, data)
+
+    # copy to another versioned bucket
+    bucket2 = get_new_bucket()
+    check_configure_versioning_retry(bucket2, True, "Enabled")
+    key4 = bucket2.copy_key('bar321foo3', bucket.name, key.name, src_version_id = key.version_id)
+    key4 = bucket2.get_key(key4.name)
+    eq(key4.size, size)
+    got = key4.get_contents_as_string()
+    eq(got, data)
+
+    # copy to another non versioned bucket
+    bucket3 = get_new_bucket()
+    key5 = bucket3.copy_key('bar321foo4', bucket.name, key.name , src_version_id = key.version_id)
+    key5 = bucket3.get_key(key5.name)
+    eq(key5.size, size)
+    got = key5.get_contents_as_string()
+    eq(got, data)
+
+    # copy from a non versioned bucket
+    key6 = bucket.copy_key('foo123bar2', bucket3.name, key5.name)
+    key6 = bucket.get_key(key6.name)
+    eq(key6.size, size)
+    got = key6.get_contents_as_string()
+    eq(got, data)
+
+@attr(resource='object')
+@attr(method='put')
+@attr(operation='test copy object of a multipart upload')
+@attr(assertion='successful')
+def test_object_copy_versioning_multipart_upload():
+    bucket = get_new_bucket()
+    check_configure_versioning_retry(bucket, True, "Enabled")
+    key_name="srcmultipart"
+    content_type='text/bla'
+    objlen = 30 * 1024 * 1024
+    (upload, data) = _multipart_upload(bucket, key_name, objlen, headers={'Content-Type': content_type}, metadata={'foo': 'bar'})
+    upload.complete_upload()
+    key = bucket.get_key(key_name)
+
+    # copy object in the same bucket
+    key2 = bucket.copy_key('dstmultipart', bucket.name, key.name, src_version_id = key.version_id)
+    key2 = bucket.get_key(key2.name)
+    eq(key2.metadata['foo'], 'bar')
+    eq(key2.content_type, content_type)
+    eq(key2.size, key.size)
+    got = key2.get_contents_as_string()
+    eq(got, data)
+
+    # second copy
+    key3 = bucket.copy_key('dstmultipart2', bucket.name, key2.name, src_version_id = key2.version_id)
+    key3 = bucket.get_key(key3.name)
+    eq(key3.metadata['foo'], 'bar')
+    eq(key3.content_type, content_type)
+    eq(key3.size, key.size)
+    got = key3.get_contents_as_string()
+    eq(got, data)
+
+    # copy to another versioned bucket
+    bucket2 = get_new_bucket()
+    check_configure_versioning_retry(bucket2, True, "Enabled")
+    key4 = bucket2.copy_key('dstmultipart3', bucket.name, key.name, src_version_id = key.version_id)
+    key4 = bucket2.get_key(key4.name)
+    eq(key4.metadata['foo'], 'bar')
+    eq(key4.content_type, content_type)
+    eq(key4.size, key.size)
+    got = key4.get_contents_as_string()
+    eq(got, data)
+
+    # copy to another non versioned bucket
+    bucket3 = get_new_bucket()
+    key5 = bucket3.copy_key('dstmultipart4', bucket.name, key.name, src_version_id = key.version_id)
+    key5 = bucket3.get_key(key5.name)
+    eq(key5.metadata['foo'], 'bar')
+    eq(key5.content_type, content_type)
+    eq(key5.size, key.size)
+    got = key5.get_contents_as_string()
+    eq(got, data)
+
+    # copy from a non versioned bucket
+    key6 = bucket.copy_key('dstmultipart5', bucket3.name, key5.name)
+    key6 = bucket3.get_key(key6.name)
+    eq(key6.metadata['foo'], 'bar')
+    eq(key6.content_type, content_type)
+    eq(key6.size, key.size)
+    got = key6.get_contents_as_string()
+    eq(got, data)
 
 def transfer_part(bucket, mp_id, mp_keyname, i, part):
     """Transfer a part of a multipart upload. Designed to be run in parallel.
@@ -5922,7 +6055,7 @@ def test_multipart_resend_first_finishes_last():
         lambda: counter.inc()
         )
     mp.upload_part_from_file(fp_dryrun, 1)
-    mp.complete_upload
+    mp.complete_upload()
 
     bucket.delete_key(key_name)
 
@@ -6030,6 +6163,22 @@ def test_ranged_request_invalid_range():
     eq(e.status, 416)
     eq(e.error_code, 'InvalidRange')
 
+@attr(resource='object')
+@attr(method='get')
+@attr(operation='range')
+@attr(assertion='returns invalid range, 416')
+def test_ranged_request_empty_object():
+    content = ''
+
+    bucket = get_new_bucket()
+    key = bucket.new_key('testobj')
+    key.set_contents_from_string(content)
+
+    # test invalid range
+    e = assert_raises(boto.exception.S3ResponseError, key.open, 'r', headers={'Range': 'bytes=40-50'})
+    eq(e.status, 416)
+    eq(e.error_code, 'InvalidRange')
+    
 def check_can_test_multiregion():
     if not targets.main.master or len(targets.main.secondaries) == 0:
         raise SkipTest
@@ -7037,3 +7186,80 @@ def test_versioned_concurrent_object_create_and_remove():
 
     eq(_count_bucket_versioned_objs(bucket), 0)
     eq(len(bucket.get_all_keys()), 0)
+
+# Create a lifecycle config.  Either days (int) and prefix (string) is given, or rules.
+# Rules is an array of dictionaries, each dict has a 'days' and a 'prefix' key
+def create_lifecycle(days = None, prefix = 'test/', rules = None):
+    lifecycle = boto.s3.lifecycle.Lifecycle()
+    if rules == None:
+        expiration = boto.s3.lifecycle.Expiration(days=days)
+        rule = boto.s3.lifecycle.Rule(id=prefix, prefix=prefix, status='Enabled',
+                                      expiration=expiration)
+        lifecycle.append(rule)
+    else:
+        for rule in rules:
+            expiration = boto.s3.lifecycle.Expiration(days=rule['days'])
+            rule = boto.s3.lifecycle.Rule(id=rule['prefix'], prefix=rule['prefix'],
+                                          status='Enabled', expiration=expiration)
+            lifecycle.append(rule)
+    return lifecycle
+
+def set_lifecycle(rules = None):
+    bucket = get_new_bucket()
+    lifecycle = create_lifecycle(rules=rules)
+    bucket.configure_lifecycle(lifecycle)
+    return bucket
+
+
+@attr(resource='bucket')
+@attr(method='put')
+@attr(operation='set lifecycle config')
+@attr('lifecycle')
+def test_lifecycle_set():
+    bucket = get_new_bucket()
+    lifecycle = create_lifecycle(rules=[{'days': 1, 'prefix': 'test1/'},
+                                        {'days': 2, 'prefix': 'test2/'}])
+    eq(bucket.configure_lifecycle(lifecycle), True)
+
+@attr(resource='bucket')
+@attr(method='get')
+@attr(operation='get lifecycle config')
+@attr('lifecycle')
+def test_lifecycle_get():
+    bucket = set_lifecycle(rules=[{'days': 31, 'prefix': 'test1/'},
+                                  {'days': 120, 'prefix': 'test2/'}])
+    current = bucket.get_lifecycle_config()
+    eq(current[0].expiration.days, 31)
+    eq(current[0].id, 'test1/')
+    eq(current[0].prefix, 'test1/')
+    eq(current[1].expiration.days, 120)
+    eq(current[1].id, 'test2/')
+    eq(current[1].prefix, 'test2/')
+
+# The test harnass for lifecycle is configured to treat days as 2 second intervals.
+@attr(resource='bucket')
+@attr(method='put')
+@attr(operation='test lifecycle expiration')
+@attr('lifecycle')
+@attr('fails_on_aws')
+def test_lifecycle_expiration():
+    bucket = set_lifecycle(rules=[{'days': 2, 'prefix': 'expire1/'},
+                                  {'days': 6, 'prefix': 'expire3/'}])
+    _create_keys(bucket=bucket, keys=['expire1/foo', 'expire1/bar', 'keep2/foo',
+                                      'keep2/bar', 'expire3/foo', 'expire3/bar'])
+    # Get list of all keys
+    init_keys = bucket.get_all_keys()
+    # Wait for first expiration (plus fudge to handle the timer window)
+    time.sleep(35)
+    expire1_keys = bucket.get_all_keys()
+    # Wait for next expiration cycle
+    time.sleep(15)
+    keep2_keys = bucket.get_all_keys()
+    # Wait for final expiration cycle
+    time.sleep(25)
+    expire3_keys = bucket.get_all_keys()
+
+    eq(len(init_keys), 6)
+    eq(len(expire1_keys), 4)
+    eq(len(keep2_keys), 4)
+    eq(len(expire3_keys), 2)
