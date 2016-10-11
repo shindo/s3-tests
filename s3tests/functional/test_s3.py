@@ -5753,12 +5753,11 @@ def _test_atomic_read(file_size):
     key.set_contents_from_file(fp_a)
 
     read_conn = boto.s3.connection.S3Connection(
-        aws_access_key_id=s3['main'].aws_access_key_id,
-        aws_secret_access_key=s3['main'].aws_secret_access_key,
         is_secure=s3['main'].is_secure,
         port=s3['main'].port,
         host=s3['main'].host,
         calling_format=s3['main'].calling_format,
+        provider=s3['main'].provider,
         )
 
     read_bucket = read_conn.get_bucket(bucket.name)
