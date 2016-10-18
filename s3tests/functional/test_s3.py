@@ -1031,7 +1031,7 @@ def test_object_head_zero_bytes():
 def test_object_write_check_etag():
     bucket = get_new_bucket()
     key = bucket.new_key('foo')
-    res = _make_request('PUT', bucket, key, body='bar')
+    res = _make_request('PUT', bucket, key, body='bar', authenticated=True)
     eq(res.status, 200)
     eq(res.reason, 'OK')
     eq(res.getheader("ETag"), '"37b51d194a7513e45b56f6524f2d51f2"')
