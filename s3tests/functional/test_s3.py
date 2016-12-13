@@ -7263,3 +7263,17 @@ def test_lifecycle_expiration():
     eq(len(expire1_keys), 4)
     eq(len(keep2_keys), 4)
     eq(len(expire3_keys), 2)
+
+@attr(resource='object')
+@attr(method='put')
+@attr(operation='create object with explicit content-type')
+@attr(assertion='works')
+def test_object_explicit_contenttype():
+    bucket = get_new_bucket()
+    key = bucket.new_key('explicit-content-type')
+    content_type = 'text/bla'
+    key.set_contents_from_string('foo', headers={'Content-Type': content_type})
+    # Verify that Content-Type is preserved
+    get_key = bucket.get_key(key.name)
+    eq(get_key.get_contents_as_string(), 'foo')
+    eq(get_key.content_type, content_type)
