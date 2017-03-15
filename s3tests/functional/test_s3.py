@@ -5190,7 +5190,7 @@ def test_multipart_upload():
     key="mymultipart"
     content_type='text/bla'
     objlen = 30 * 1024 * 1024
-    (upload, data) = _multipart_upload(bucket, key, objlen, headers={'Content-Type': content_type})
+    (upload, data) = _multipart_upload(bucket, key, objlen, headers={'Content-Type': content_type}, metadata={'foo': 'bar'})
     upload.complete_upload()
 
     result = _head_bucket(bucket)
@@ -5199,8 +5199,8 @@ def test_multipart_upload():
     eq(result.get('x-rgw-bytes-used', 30 * 1024 * 1024), 30 * 1024 * 1024)
 
     k=bucket.get_key(key)
-    # eq(k.metadata['foo'], 'bar')
-    # eq(k.content_type, content_type)
+    eq(k.metadata['foo'], 'bar')
+    eq(k.content_type, content_type)
     test_string=k.get_contents_as_string()
     eq(len(test_string), k.size)
     eq(test_string, data)
@@ -5210,12 +5210,12 @@ def test_multipart_upload():
 
 def _check_upload_multipart_resend(bucket, key, objlen, resend_parts):
     content_type='text/bla'
-    (upload, data) = _multipart_upload(bucket, key, objlen, headers={'Content-Type': content_type}, resend_parts=resend_parts)
+    (upload, data) = _multipart_upload(bucket, key, objlen, headers={'Content-Type': content_type}, metadata={'foo': 'bar'}, resend_parts=resend_parts)
     upload.complete_upload()
 
     k=bucket.get_key(key)
-    # eq(k.metadata['foo'], 'bar')
-    # eq(k.content_type, content_type)
+    eq(k.metadata['foo'], 'bar')
+    eq(k.content_type, content_type)
     test_string=k.get_contents_as_string()
     eq(k.size, len(test_string))
     eq(k.size, objlen)
